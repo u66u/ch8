@@ -1,10 +1,10 @@
 mod utils;
 mod memory;
 mod cpu;
-mod run;
+mod instructions;
 
 use cpu::C8Kernel;
-use run::{ Args, ExitKind };
+use instructions::{ Args, ExitType };
 use std::process::exit;
 
 fn main() {
@@ -12,10 +12,10 @@ fn main() {
     match C8Kernel::run_from_args(args) {
         Ok(kind) =>
             match kind {
-                ExitKind::Natural => {
+                ExitType::Natural => {
                     exit(0);
                 }
-                ExitKind::Forced => {
+                ExitType::Forced => {
                     exit(130);
                 }
             }

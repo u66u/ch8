@@ -242,27 +242,27 @@ impl C8Kernel {
     }
 }
 
-pub enum HaltSignal {
+pub enum HaltSig {
     Halt,
 }
-pub enum InputSignal {
+pub enum InputSig {
     Exit,
 }
-pub enum ExitKind {
+pub enum ExitType {
     Forced,
     Natural,
 }
 
 pub struct ChannelHandler {
-    timer_tx: Sender<HaltSignal>,
-    input_tx: Sender<HaltSignal>,
-    input_rx: Receiver<InputSignal>,
+    timer_tx: Sender<HaltSig>,
+    input_tx: Sender<HaltSig>,
+    input_rx: Receiver<InputSig>,
 }
 
 impl ChannelHandler {
     pub fn halt(&self) -> CustomResult<()> {
         for tx in &[&self.input_tx, &self.timer_tx] {
-            tx.send(HaltSignal::Halt).c8_err("Could not send message to thread")?;
+            tx.send(HaltSig::Halt).c8_err("Could not send message to thread")?;
         }
         Ok(())
     }
@@ -277,7 +277,7 @@ impl C8Kernel {
             ..Default::default()
         })
     }
-    pub fn run_from_args(args: Args) -> CustomResult<ExitKind> {
+    pub fn run_from_args(args: Args) -> CustomResult<ExitType> {
         let executor = if args.hex { Self::run_hex } else { Self::run_binary };
         let mut buf = vec![];
         File::open(args.file)
@@ -286,7 +286,7 @@ impl C8Kernel {
             .c8_err("Error occurred trying to read the file")?;
         executor(&buf)
     }
-    pub fn run_hex(rom: &[u8]) -> CustomResult<ExitKind> {
+    pub fn run_hex(rom: &[u8]) -> CustomResult<ExitType> {
         let mut bin = vec![];
         let hex = |c: u8| {
             match c {
@@ -307,7 +307,7 @@ impl C8Kernel {
         let mut machine = Self::new(rom)?;
         machine.run()
     }
-    pub fn run_binary(rom: &[u8]) -> CustomResult<ExitKind> {
+    pub fn run_binary(rom: &[u8]) -> CustomResult<ExitType> {
         let mut machine = Self::new(rom)?;
         machine.run()
     }
@@ -349,14 +349,14 @@ impl C8Kernel {
             input_rx: display_rx,
         })
     }
-    pub fn spawn_timer(&self) -> CustomResult<Sender<HaltSignal>> {
+    pub fn spawn_timer(&self) -> CustomResult<Sender<HaltSig>> {
         let dt = Arc::clone(&self.timers.dt);
         let st = Arc::clone(&self.timers.st);
         let (timer_tx, timer_rx) = mpsc::channel();
         thread::spawn(move || {
             loop {
                 match timer_rx.try_recv() {
-                    Ok(HaltSignal::Halt) | Err(TryRecvError::Disconnected) => {
+                    Ok(HaltSig::Halt) | Err(TryRecvError::Disconnected) => {
                         break;
                     }
                     Err(TryRecvError::Empty) => (),
@@ -374,7 +374,7 @@ impl C8Kernel {
         });
         Ok(timer_tx)
     }
-    pub fn spawn_display(&self) -> CustomResult<(Receiver<InputSignal>, Sender<HaltSignal>)> {
+    pub fn spawn_display(&self) -> CustomResult<(Receiver<InputSig>, Sender<HaltSig>)> {
         let input = Arc::clone(&self.input.bits);
         let (display_tx, display_rx) = mpsc::channel();
         let (input_tx, input_rx) = mpsc::channel();
@@ -382,7 +382,7 @@ impl C8Kernel {
             loop {
                 let mut starts: [Option<Instant>; 16] = [None; 16];
                 match input_rx.try_recv() {
-                    Ok(HaltSignal::Halt) | Err(TryRecvError::Disconnected) => {
+                    Ok(HaltSig::Halt) | Err(TryRecvError::Disconnected) => {
                         break;
                     }
                     Err(TryRecvError::Empty) => (),
@@ -413,7 +413,7 @@ impl C8Kernel {
                         } else {
                             match k.code {
                                 KeyCode::Char('c') => {
-                                    display_tx.send(InputSignal::Exit).unwrap();
+                                    display_tx.send(InputSig::Exit).unwrap();
                                     // prevents race conditions as the thread can be killed at any point after this line
                                     thread::sleep(Duration::from_secs(300));
                                 }
@@ -431,23 +431,23 @@ impl C8Kernel {
         });
         Ok((display_rx, input_tx))
     }
-    pub fn run(&mut self) -> CustomResult<ExitKind> {
+    pub fn run(&mut self) -> CustomResult<ExitType> {
         self.setup_terminal()?;
         let channels = self.spawn_extra_threads()?;
         self.buf.clear();
         loop {
             match channels.input_rx.try_recv() {
-                Ok(InputSignal::Exit) => {
+                Ok(InputSig::Exit) => {
                     self.teardown_terminal()?;
                     channels.halt()?;
-                    return Ok(ExitKind::Forced);
+                    return Ok(ExitType::Forced);
                 }
                 _ => (),
             }
             if self.pc >= (MEM_SIZE as u16) {
                 self.teardown_terminal()?;
                 channels.halt()?;
-                return Ok(ExitKind::Natural);
+                return Ok(ExitType::Natural);
             }
             let high = *self.mem.get(self.pc);
             let low = *self.mem.get(self.pc + 1);
